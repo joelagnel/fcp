@@ -24,6 +24,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
+#define DEBUG_FCP 1
 #define EXT2_SET_PARENT 100
 #define EXT2_GET_PARENT 101
 #define EXT2_GET_CHILDR 102
@@ -137,6 +138,7 @@ int main(int argc, char **argv)
 	    else
 	      printf("destination child created: %s\n", dest);
 	  }
+        unlink(name);
 	printf("All done.\n");
 	return 0;
       }
