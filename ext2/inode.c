@@ -141,7 +141,7 @@ void ext2_delete_from_parent(struct inode * inode)
       cleanup:
 	kfree(temp);
 	kfree(temp1);
-	iput(parent_inode);
+	iput(parent_inode); /* This should take care of dropping root when it has no children */
       }
     }
   else
@@ -162,7 +162,6 @@ void ext2_delete_inode (struct inode * inode)
 		goto no_delete;
 
 	ext2_delete_from_parent(inode);
-
 	EXT2_I(inode)->i_dtime	= get_seconds();
 	mark_inode_dirty(inode);
 	ext2_update_inode(inode, inode_needs_sync(inode));
@@ -767,9 +766,9 @@ reread:
 		      partial--;
 		    }
 		    ext2_debug ("%lu: Starting redirection for block number: %ld.\n", inode->i_ino, (long int)iblock);
-		    ext2_get_blocks(parent_inode, iblock, maxblocks, bh_result, create);
-		    //		    iput(parent_inode);
-		    // return ret;
+		    ret = ext2_get_blocks(parent_inode, iblock, maxblocks, bh_result, create);
+		    iput(parent_inode);
+		    return ret;
 		  }
 		else
                     ext2_debug("%lu: No parent found.\n", inode->i_ino);

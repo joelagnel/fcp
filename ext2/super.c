@@ -166,7 +166,7 @@ static void ext2_drop_inode(struct inode *inode)
 
   ext2_debug("ext2_drop_inode called\n");
 
-  /* for .root inodes */
+  /* for root inodes */
   if (ext2_inode_has_children(inode))
     {
       ext2_debug("has children,.. should not delete from disk, just forget.\n");
@@ -174,9 +174,12 @@ static void ext2_drop_inode(struct inode *inode)
     }
   else
     {
-      ext2_debug("dropping me (%lu), bye\n", inode->i_ino);	
+      ext2_debug("checking if me to be dropped (%lu)\n", inode->i_ino);
       if (!inode->i_nlink)
-	generic_delete_inode(inode);
+	{
+	  ext2_debug("dropped (%lu)\n", inode->i_ino);
+	  generic_delete_inode(inode);
+	}
       else
 	generic_forget_inode(inode);
     }
