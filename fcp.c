@@ -9,9 +9,8 @@
  * copy-on-write in ext2, in < 500 lines of code (kernel patch + fcp).
  * fcp heavily depends on the kernel patch which should compile on all new kernels.
  *
- * This is purely original and hard work, modifying and redestribution is allowed
- * provided this header is kept intact. This file may be redistributed under the terms
- * of the GNU General Public License.
+ * This is original work, modifying and redestribution is allowed provided this header
+ * is kept intact. This file may be redistributed under the terms of the GPL.
  */
 
 #define _GNU_SOURCE 1
@@ -100,7 +99,7 @@ int main(int argc, char **argv)
 
   switch(argv[1][0])
     {
-    case 'c':
+    case 'c':			// remove this option, moves happen ALWAYS.
       mv = 0;
     case 'r': /* fast copy */
       if(argc < 4) {
