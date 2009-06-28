@@ -14,6 +14,8 @@
  *
  *  Big-endian to little-endian byte-swapping/bitmaps by
  *        David S. Miller (davem@caip.rutgers.edu), 1995
+ *
+ *  COW layer: Root inode reclamation, Joel (agnel.joel@gmail.com) 2009 
  */
 
 #include <linux/module.h>

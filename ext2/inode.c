@@ -20,6 +20,8 @@
  * 	(jj@sunsite.ms.mff.cuni.cz)
  *
  *  Assorted race fixes, rewrite of ext2_get_block() by Al Viro, 2000
+ *
+ *  COW layer: Block redirection and child deletion by Joel (agnel.joel@gmail.com), 2009
  */
 
 #include <linux/smp_lock.h>
