@@ -73,7 +73,7 @@ int create_child(int source_fd, char *dest)
     }
   source_size = (long)buf.st_size;
   source_inode = (int)buf.st_ino;
-  lseek(fd, source_size + 9000, SEEK_SET); /* make sure we're atleast one block away */
+  // lseek(fd, source_size + 9000, SEEK_SET); /* not required, we're doing this in the kernel */
   write(fd, "\0", 1);
   set_inode_parent(fd, source_inode);
   close(fd);
