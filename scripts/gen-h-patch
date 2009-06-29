@@ -1,0 +1,1 @@
+find -iname "*.h" -exec diff -u ../linux-2.6.24/"{}" ./"{}" \; 2>&1| grep -v "No such" | tee h-diff 
