@@ -1,0 +1,64 @@
+<html>
+  <head><title>Ext2/3 kernel patch for snapshot and </title>
+    <style type="text/css">
+      body { font-family:"Verdana",Georgia,Serif; }
+      code { font-family:"Courier"; }
+    </style>
+  </head>
+<body>
+<h2>FCP - fast file snapshots for ext2/3</h2>
+
+fcp has 2 components. A kernel patch that adds copy-on-write to ext2/3 and a userspace tool to snapshot/copy files. This helps optimize storage and backup data quickly and easily in real-time without the need for complex volume management software. Its simple, fast and free (see features).<br><br>
+
+This page describes its features, easy installation steps and inner working. fcp was written out of the need for a better "cp" utility to exploit block sharing capabilities of a filesystem, which can result in massive space and time savings. It has been implemented for ext2 (ext3 is in the works). I hope that one day it will be ported for all major filesystems.<br><br>
+<h2>Features</h2>
+<ul>
+<li type="disk">Simplicity: Its conceptually very simple as you'll see in "How it works". This also means that it has lesser moving parts and lesser (or no) bugs.<br>
+<li type="disk">Easy to migrate: you don't have to port old files, its not a new filesystem, we're as much ext2 as we ever were. Exisiting ext2/3 formatted devices will work.<br>
+<li type="disk">Easy to install: Simple instructions below will get you up and running in no time.<br>
+<li type="disk">FOSS: Its free and open source, feel free to modify/experiment with it as much as you like, you can contribute back by reporting bugs.
+</ul>
+
+<h2>Download</h2>
+<h3>Using git (recommended)</h3>
+<code>git clone git@github.com:joelagnel/fcp.git</code>
+
+<h3>Compressed Tarball</h3>
+You can also download the tar, and uncompress it to a convenient place.<br>
+
+
+
+<h2>Installation instructions</h2>
+
+
+
+<h3>Kernel patch</h3>
+1. FCP was developed and tested with linux kernel 2.6.24, but it should work with newer kernels.<br><br>
+
+2. Make sure you have your kernel's source somewhere.<br><br>
+
+3. If you are on Ubuntu, to get the sources for your kernel, run:<br>
+<code>apt-get source linux-image-`uname -r`</code><br><br>
+
+4. Copy fcp-kernel.patch from the download folder to your kernel source directory.<br><br>
+
+5. patch the kernel<br><code>patch -p0 < fcp-kernel.patch</code><br><br>
+
+6. Compile and install kernel.<br>
+
+<h3>Compile and install fcp</h3>
+1. In the fcp directory, run:<br>
+<code>gcc -o fcp fcp.c -lc</code><br><br>
+2. Then run the following as root:<br>
+<code>ln -s -t fcp /usr/bin/fcp</code><br>
+
+
+<h2>Screenshots</h2>
+
+<h2>How it works.</h2>
+
+<h2>Contact me</h2>
+If you're having a hard time getting it to work, and if I'm free, drop me a line and we'll work it out, don't worry ;)
+I also welcome contributions, bug reports and any other feedback.
+</body>
+</html>
