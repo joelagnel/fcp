@@ -32,12 +32,14 @@
 #include <linux/module.h>
 #include <linux/writeback.h>
 #include <linux/buffer_head.h>
-#include <linux/mpage.h>
+// #include <linux/mpage.h>
 #include "ext2.h"
 #include "acl.h"
 #include "xip.h"
 
 #include "xattr.h"
+
+#include "mpage.h"
 
 MODULE_AUTHOR("Remy Card and others");
 MODULE_DESCRIPTION("Second Extended Filesystem");
@@ -70,7 +72,7 @@ int ext2_inode_has_parent(struct inode *inode)
       if(!value) {
 	return 0;
       }
-      ext2_debug ("%lu: parent inode number  = %d\n", inode->i_ino, *value);
+      // ext2_debug ("%lu: parent inode number  = %d\n", inode->i_ino, *value);
       retval = *value;
       kfree(value);
       return retval;
@@ -84,13 +86,13 @@ int ext2_inode_has_children(struct inode *inode)
   retval = ext2_xattr_get(inode, 11, "children", NULL, 0);
   if(retval > 0 && retval > sizeof(int))
     {
-      ext2_debug("retval is %d\n", retval);
-      ext2_debug("size of int %d\n", sizeof(int));
+      // ext2_debug("retval is %d\n", retval);
+      // ext2_debug("size of int %d\n", sizeof(int));
       return 1;
     }
   else
     {
-      ext2_debug("no children, retval = %d\n", retval);
+      // ext2_debug("no children, retval = %d\n", retval);
       return 0;
     }
 }
@@ -101,13 +103,13 @@ void ext2_delete_from_parent(struct inode * inode)
   unsigned long parent_ino;
   struct inode * parent_inode;
 
-  ext2_debug("%lu: Looking for parent\n", inode->i_ino);
+  // ext2_debug("%lu: Looking for parent\n", inode->i_ino);
   retval = ext2_xattr_get(inode, 10, "parent", NULL, 0);
   if(retval > 0)
     {
-      ext2_debug("%lu: retval > 0\n", inode->i_ino);
+      // ext2_debug("%lu: retval > 0\n", inode->i_ino);
       retval = ext2_xattr_get(inode, 10, "parent", &parent_ino, sizeof(unsigned long));
-      ext2_debug("%lu: Found parent %lu\n", inode->i_ino, parent_ino);
+      // ext2_debug("%lu: Found parent %lu\n", inode->i_ino, parent_ino);
       parent_inode = iget(inode->i_sb, parent_ino);
       if(!parent_inode)
 	return;
@@ -129,11 +131,11 @@ void ext2_delete_from_parent(struct inode * inode)
 	      }
 	    else
 	      {
-       	        ext2_debug("%lu: deleting %d from parent list\n", parent_inode->i_ino, *value);
+       	        // ext2_debug("%lu: deleting %d from parent list\n", parent_inode->i_ino, *value);
 	      }
 	    value++;
 	  }
-	ext2_debug("%lu: parent has %d children left\n", parent_inode->i_ino, count);
+	// ext2_debug("%lu: parent has %d children left\n", parent_inode->i_ino, count);
 	*new_value = 0;
         ext2_xattr_set(parent_inode, 11, "children", temp1, (count+1)*sizeof(int), 0);
 	if(!count)
@@ -148,7 +150,7 @@ void ext2_delete_from_parent(struct inode * inode)
     }
   else
     {
-      ext2_debug("no parent found\n");
+      // ext2_debug("no parent found\n");
       return;
     }
 }
@@ -698,6 +700,16 @@ static int ext2_get_blocks(struct inode *inode,
 	struct inode *parent_inode;
 	void *value = NULL;
 
+	/*
+	  Joel: Detect if dirty buffers are being written to disk
+	*/
+
+	ext2_debug("%lu: in get_block, create: %d\n", inode->i_ino, create);
+	if((bh_result->b_state & BH_Dirty) && (bh_result->b_state & BH_Uptodate))
+	  {
+	    ext2_debug("%lu: dirty block %ld being written\n", inode->i_ino, (long int)iblock);
+	  }
+
 	depth = ext2_block_to_path(inode,iblock,offsets,&blocks_to_boundary);
 
 	if (depth == 0)
@@ -747,18 +759,18 @@ reread:
 
 	    if(!create && err != -EIO) // && partial == &(chain[depth-1]))
 	      {
-		ext2_debug("%lu: Block redirection requested for block number: %ld\n", inode->i_ino, (long int)iblock);
+		// ext2_debug("%lu: Block redirection requested for block number: %ld\n", inode->i_ino, (long int)iblock);
              	retval = ext2_xattr_get(inode, 10, "parent", NULL, 0);
                 if ( retval > 0)
 		  {
-                    ext2_debug("%lu: We have a parent inode, lets use it.\n", inode->i_ino);
+		    // ext2_debug("%lu: We have a parent inode, lets use it.\n", inode->i_ino);
 		    value = kmalloc(retval, GFP_KERNEL);
 		    if (!value)
 		      return -ENOMEM;
 		    ext2_xattr_get(inode, 10, "parent", value, retval);
                     parent_ino = *((int *)value);
 		    kfree(value);
-		    ext2_debug ("%lu: Found parent inode number = %d\n", inode->i_ino, parent_ino);
+		    // ext2_debug ("%lu: Found parent inode number = %d\n", inode->i_ino, parent_ino);
 
 		    parent_inode = iget(inode->i_sb, parent_ino);
 		    if(!parent_inode) goto cleanup;
@@ -767,13 +779,13 @@ reread:
 		      brelse(partial->bh);
 		      partial--;
 		    }
-		    ext2_debug ("%lu: Starting redirection for block number: %ld.\n", inode->i_ino, (long int)iblock);
+		    // ext2_debug ("%lu: Starting redirection for block number: %ld.\n", inode->i_ino, (long int)iblock);
 		    ret = ext2_get_blocks(parent_inode, iblock, maxblocks, bh_result, create);
 		    iput(parent_inode);
 		    return ret;
 		  }
-		else
-                    ext2_debug("%lu: No parent found.\n", inode->i_ino);
+		// else
+		  // ext2_debug("%lu: No parent found.\n", inode->i_ino);
 	      }
 	    goto cleanup;
 	  }
@@ -859,19 +871,20 @@ int ext2_get_block(struct inode *inode, sector_t iblock, struct buffer_head *bh_
 
 static int ext2_writepage(struct page *page, struct writeback_control *wbc)
 {
-	return block_write_full_page(page, ext2_get_block, wbc);
+  ext2_debug("mpage_writepagE called..\n");
+  return block_write_full_page(page, ext2_get_block, wbc);
 }
 
 static int ext2_readpage(struct file *file, struct page *page)
 {
-	return mpage_readpage(page, ext2_get_block);
+	return ext2_mpage_readpage(page, ext2_get_block);
 }
 
 static int
 ext2_readpages(struct file *file, struct address_space *mapping,
 		struct list_head *pages, unsigned nr_pages)
 {
-	return mpage_readpages(mapping, pages, nr_pages, ext2_get_block);
+	return ext2_mpage_readpages(mapping, pages, nr_pages, ext2_get_block);
 }
 
 int __ext2_write_begin(struct file *file, struct address_space *mapping,
@@ -930,7 +943,8 @@ ext2_direct_IO(int rw, struct kiocb *iocb, const struct iovec *iov,
 static int
 ext2_writepages(struct address_space *mapping, struct writeback_control *wbc)
 {
-	return mpage_writepages(mapping, wbc, ext2_get_block);
+  ext2_debug("mpage_writepages called..\n");
+  return ext2_mpage_writepages(mapping, wbc, ext2_get_block);
 }
 
 const struct address_space_operations ext2_aops = {

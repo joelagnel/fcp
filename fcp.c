@@ -83,7 +83,7 @@ int main(int argc, char **argv)
 {
   int fd, source_fd, ret, value;
   int *list, count, i, mv = 1;
-  char *source, *dest, *name, *suffix = ".root";
+  char *source, *dest, *name, *suffix = ".root", *buff;
 
   if(argc < 3) {
     perror("Usage: fcp g|c filename [value]\n");
@@ -141,6 +141,23 @@ int main(int argc, char **argv)
 	printf("All done.\n");
 	return 0;
       }
+
+    case 't':
+      source = argv[2];
+      fd = open(source, O_WRONLY);
+      if(fd > 0)
+	{
+	  lseek(fd, 4096, SEEK_SET);
+	  buff = (char *)malloc(10000);
+	  ret = write(fd, buff, 10000);
+	  printf("%d bytes written\n", ret);
+	}
+      else
+	{
+	  printf("couldn't open file\n");
+	  close(fd);
+	}
+      return 0;
 
     case 's':
       if(argc < 4) {
