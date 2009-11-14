@@ -14,7 +14,7 @@ index 3203042..22fa588 100644
  /* ioctl.c */
  extern long ext2_ioctl(struct file *, unsigned int, unsigned long);
 diff --git a/fs/ext2/inode.c b/fs/ext2/inode.c
-index acf6788..bcf0a14 100644
+index acf6788..c800beb 100644
 --- a/fs/ext2/inode.c
 +++ b/fs/ext2/inode.c
 @@ -20,6 +20,9 @@
@@ -168,10 +168,11 @@ index acf6788..bcf0a14 100644
  	depth = ext2_block_to_path(inode,iblock,offsets,&blocks_to_boundary);
  
  	if (depth == 0)
-@@ -624,6 +733,49 @@ static int ext2_get_blocks(struct inode *inode,
+@@ -624,7 +733,48 @@ static int ext2_get_blocks(struct inode *inode,
  
  	/* Next simple case - plain lookup or failed read of indirect block */
  	if (!create || err == -EIO)
+-		goto cleanup;
 +	  {
 +	    /*
 +	      This code block is executed when we've found a hole *I think*.
@@ -214,11 +215,10 @@ index acf6788..bcf0a14 100644
 +	      }
 +	    goto cleanup;
 +	  }
-+ 
- 		goto cleanup;
  
  	mutex_lock(&ei->truncate_mutex);
-@@ -1337,7 +1489,7 @@ bad_inode:
+ 	/*
+@@ -1337,7 +1487,7 @@ bad_inode:
  	return ERR_PTR(ret);
  }
  
