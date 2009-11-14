@@ -1,0 +1,440 @@
+diff --git a/fs/ext2/ext2.h b/fs/ext2/ext2.h
+index 3203042..22fa588 100644
+--- a/fs/ext2/ext2.h
++++ b/fs/ext2/ext2.h
+@@ -138,6 +138,10 @@ extern int ext2_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
+ int __ext2_write_begin(struct file *file, struct address_space *mapping,
+ 		loff_t pos, unsigned len, unsigned flags,
+ 		struct page **pagep, void **fsdata);
++/* Joel: fcp */
++extern int ext2_inode_has_parent (struct inode *);
++extern int ext2_inode_has_children (struct inode *);
++extern void ext2_delete_from_parent (struct inode *);
+ 
+ /* ioctl.c */
+ extern long ext2_ioctl(struct file *, unsigned int, unsigned long);
+diff --git a/fs/ext2/inode.c b/fs/ext2/inode.c
+index acf6788..bcf0a14 100644
+--- a/fs/ext2/inode.c
++++ b/fs/ext2/inode.c
+@@ -20,6 +20,9 @@
+  * 	(jj@sunsite.ms.mff.cuni.cz)
+  *
+  *  Assorted race fixes, rewrite of ext2_get_block() by Al Viro, 2000
++ *
++ *
++ *  COW layer (fcp): Block redirection and child deletion by Joel (agnel.joel@gmail.com), 2009.
+  */
+ 
+ #include <linux/smp_lock.h>
+@@ -36,12 +39,13 @@
+ #include "ext2.h"
+ #include "acl.h"
+ #include "xip.h"
++#include "xattr.h"
+ 
+ MODULE_AUTHOR("Remy Card and others");
+ MODULE_DESCRIPTION("Second Extended Filesystem");
+ MODULE_LICENSE("GPL");
+ 
+-static int ext2_update_inode(struct inode * inode, int do_sync);
++int ext2_update_inode(struct inode * inode, int do_sync);
+ 
+ /*
+  * Test whether an inode is a fast symlink.
+@@ -55,6 +59,102 @@ static inline int ext2_inode_is_fast_symlink(struct inode *inode)
+ 		inode->i_blocks - ea_blocks == 0);
+ }
+ 
++int ext2_inode_has_parent(struct inode *inode)
++{
++	int retval, *value;
++	retval = ext2_xattr_get(inode, 10, "parent", NULL, 0);
++	if(retval > 0)
++	{
++		value = kmalloc(retval, GFP_KERNEL);
++		if (!value)
++			return -ENOMEM;
++		ext2_xattr_get(inode, 10, "parent", value, retval);
++		if(!value) {
++			return 0;
++		}
++		ext2_debug ("%lu: parent inode number  = %d\n", inode->i_ino, *value);
++		retval = *value;
++		kfree(value);
++		return retval;
++	}
++	return 0;
++}
++
++int ext2_inode_has_children(struct inode *inode)
++{
++	int retval;
++	retval = ext2_xattr_get(inode, 11, "children", NULL, 0);
++	if(retval > 0 && retval > sizeof(int))
++	{
++		ext2_debug("retval is %d\n", retval);
++		ext2_debug("size of int %d\n", sizeof(int));
++		return 1;
++	}
++	else
++	{
++		ext2_debug("no children, retval = %d\n", retval);
++		return 0;
++	}
++}
++
++void ext2_delete_from_parent(struct inode * inode)
++{
++	int *value, *new_value, retval, count, *temp, *temp1;
++	unsigned long parent_ino;
++	struct inode * parent_inode;
++
++	ext2_debug("%lu: Looking for parent\n", inode->i_ino);
++	retval = ext2_xattr_get(inode, 10, "parent", NULL, 0);
++	if(retval > 0)
++	{
++		ext2_debug("%lu: retval > 0\n", inode->i_ino);
++		retval = ext2_xattr_get(inode, 10, "parent", &parent_ino, sizeof(unsigned long));
++		ext2_debug("%lu: Found parent %lu\n", inode->i_ino, parent_ino);
++		parent_inode = ext2_iget(inode->i_sb, parent_ino);
++		if(!parent_inode)
++			return;
++		retval = ext2_xattr_get(parent_inode, 11, "children", NULL, 0);
++		if (retval > 0) {
++			value = (int *)kmalloc(retval, GFP_KERNEL);
++			new_value = (int *)kmalloc(retval, GFP_KERNEL);
++			temp = value;
++			temp1 = new_value;
++			retval = ext2_xattr_get(parent_inode, 11, "children", value, retval);
++			count = 0;
++			while(*value)
++			{
++				if(*value != (int)(inode->i_ino))
++				{
++					*new_value = *value;
++					new_value++;
++					count++;
++				}
++				else
++				{
++					ext2_debug("%lu: deleting %d from parent list\n", parent_inode->i_ino, *value);
++				}
++				value++;
++			}
++			ext2_debug("%lu: parent has %d children left\n", parent_inode->i_ino, count);
++			*new_value = 0;
++			ext2_xattr_set(parent_inode, 11, "children", temp1, (count+1)*sizeof(int), 0);
++			if(!count)
++			{
++				// delete inode
++			}
++cleanup:
++			kfree(temp);
++			kfree(temp1);
++			iput(parent_inode); /* This should take care of dropping root when it has no children */
++		}
++	}
++	else
++	{
++		ext2_debug("no parent found\n");
++		return;
++	}
++}
++
+ /*
+  * Called at the last iput() if i_nlink is zero.
+  */
+@@ -64,6 +164,9 @@ void ext2_delete_inode (struct inode * inode)
+ 
+ 	if (is_bad_inode(inode))
+ 		goto no_delete;
++
++	ext2_delete_from_parent(inode);
++
+ 	EXT2_I(inode)->i_dtime	= get_seconds();
+ 	mark_inode_dirty(inode);
+ 	ext2_update_inode(inode, inode_needs_sync(inode));
+@@ -586,6 +689,12 @@ static int ext2_get_blocks(struct inode *inode,
+ 	int count = 0;
+ 	ext2_fsblk_t first_block = 0;
+ 
++	/* Joel: fcp */
++	int retval, ret;
++        int parent_ino;
++	struct inode *parent_inode;
++	void *value = NULL;
++
+ 	depth = ext2_block_to_path(inode,iblock,offsets,&blocks_to_boundary);
+ 
+ 	if (depth == 0)
+@@ -624,6 +733,49 @@ static int ext2_get_blocks(struct inode *inode,
+ 
+ 	/* Next simple case - plain lookup or failed read of indirect block */
+ 	if (!create || err == -EIO)
++	  {
++	    /*
++	      This code block is executed when we've found a hole *I think*.
++	      Partial is not null, so we stumbled on a null logical addr.
++	      But we might need to figure out whether this logical addr
++	      was supposed to be for a direct or indirect block.
++	      Also when create = 0, we fall back on to the "parent" inode for
++	      a read. -Joel
++	    */
++
++	    if(!create && err != -EIO) // && partial == &(chain[depth-1]))
++	      {
++		ext2_debug("%lu: Block redirection requested for block number: %ld\n", inode->i_ino, (long int)iblock);
++             	retval = ext2_xattr_get(inode, 10, "parent", NULL, 0);
++                if ( retval > 0)
++		  {
++                    ext2_debug("%lu: We have a parent inode, lets use it.\n", inode->i_ino);
++		    value = kmalloc(retval, GFP_KERNEL);
++		    if (!value)
++		      return -ENOMEM;
++		    ext2_xattr_get(inode, 10, "parent", value, retval);
++                    parent_ino = *((int *)value);
++		    kfree(value);
++		    ext2_debug ("%lu: Found parent inode number = %d\n", inode->i_ino, parent_ino);
++
++		    parent_inode = ext2_iget(inode->i_sb, parent_ino);
++		    if(!parent_inode) goto cleanup;
++		    /* cleanup */
++		    while (partial > chain) {
++		      brelse(partial->bh);
++		      partial--;
++		    }
++		    ext2_debug ("%lu: Starting redirection for block number: %ld.\n", inode->i_ino, (long int)iblock);
++		    ret = ext2_get_blocks(parent_inode, iblock, maxblocks, bh_result, create);
++		    iput(parent_inode);
++		    return ret;
++		  }
++		else
++                    ext2_debug("%lu: No parent found.\n", inode->i_ino);
++	      }
++	    goto cleanup;
++	  }
++ 
+ 		goto cleanup;
+ 
+ 	mutex_lock(&ei->truncate_mutex);
+@@ -1337,7 +1489,7 @@ bad_inode:
+ 	return ERR_PTR(ret);
+ }
+ 
+-static int ext2_update_inode(struct inode * inode, int do_sync)
++int ext2_update_inode(struct inode * inode, int do_sync)
+ {
+ 	struct ext2_inode_info *ei = EXT2_I(inode);
+ 	struct super_block *sb = inode->i_sb;
+diff --git a/fs/ext2/ioctl.c b/fs/ext2/ioctl.c
+index 7cb4bad..538ef5a 100644
+--- a/fs/ext2/ioctl.c
++++ b/fs/ext2/ioctl.c
+@@ -16,7 +16,7 @@
+ #include <linux/smp_lock.h>
+ #include <asm/current.h>
+ #include <asm/uaccess.h>
+-
++#include "xattr.h"
+ 
+ long ext2_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+ {
+@@ -25,10 +25,109 @@ long ext2_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+ 	unsigned int flags;
+ 	unsigned short rsv_window_size;
+ 	int ret;
+-
++	void *value = NULL;
++	struct inode * parent_inode;
++	int retval, count = 0, i;
++ 
+ 	ext2_debug ("cmd = %u, arg = %lu\n", cmd, arg);
+ 
+ 	switch (cmd) {
++
++		/*
++		 * Joel Agnel: fcp ioctls. TODO: Rewrite using macros.
++		 */
++		case 100:
++			parent_inode = ext2_iget(inode->i_sb, arg);
++
++			/* set parent of child inode */
++			ext2_debug ("%lu: setting my parent inode to %lu\n", inode->i_ino, arg);
++			ext2_xattr_set(inode, 10, "parent", &arg, sizeof(int), 0);
++			/* also set size and mode of inode to parents' */
++			ext2_debug ("%lu: setting my size and mode to parents\n", inode->i_ino);
++			inode->i_size = parent_inode->i_size;
++			inode->i_mode = parent_inode->i_mode;
++			ext2_sync_inode(inode);
++
++			/* add to list of parent inode's children */
++			retval = ext2_xattr_get(parent_inode, 11, "children", NULL, 0);
++			if (retval > 0)
++			{
++				ext2_debug ("%lu: adding to child list : %lu\n", parent_inode->i_ino, inode->i_ino);
++				count = retval + sizeof(int);
++				value = (int *)kmalloc(count, GFP_KERNEL);
++				if (!value)
++					return -ENOMEM;
++				ext2_xattr_get(parent_inode, 11, "children", value, retval);
++				for(i=0; i<retval; i++)
++					if ( ((int *)value)[i] == inode->i_ino )
++					{
++						ext2_debug ("%lu: child %lu exists\n", parent_inode->i_ino, inode->i_ino);
++						return 0;
++					}
++				ext2_debug ("%lu: (retval/sizeof(int)) : %d\n", parent_inode->i_ino, (retval/sizeof(int)));
++				((int *)value)[(retval/sizeof(int))-1] = inode->i_ino;
++				((int *)value)[(retval/sizeof(int))] = 0;
++				ext2_xattr_set(parent_inode, 11, "children", value, count, 0);
++				kfree(value);
++			}
++			else
++			{
++				ext2_debug ("%lu: child list doesn't exist, creating.\n", parent_inode->i_ino);
++				count = 2 * sizeof(int);
++				value = (int *)kmalloc(count, GFP_KERNEL);
++				((int *)value)[0] = inode->i_ino;
++				((int *)value)[1] = 0; /* end marker*/
++				ext2_xattr_set(parent_inode, 11, "children", value, 2 * sizeof(int), 0);
++				kfree(value);
++			}
++			if(parent_inode)
++			{
++				iput(parent_inode);
++			}
++			return 0;
++
++		case 101:
++			retval = ext2_xattr_get(inode, 10, "parent", NULL, 0);
++			if (retval > 0) {
++				value = kmalloc(retval, GFP_KERNEL);
++				if (!value)
++					return -ENOMEM;
++				retval = ext2_xattr_get(inode, 10, "parent", value, retval);
++				if(!value) {
++					return 1;
++				}
++				ext2_debug ("%lu: parent inode number  = %d\n", inode->i_ino, *((int *)value));
++				put_user(*((int *)value), (int *)arg);
++				kfree(value);
++			}
++			return 0;
++
++		case 102:
++			retval = ext2_xattr_get(inode, 11, "children", NULL, 0);
++			if (retval > 0) {
++				value = kmalloc(retval, GFP_KERNEL);
++				if (!value)
++					return -ENOMEM;
++				retval = ext2_xattr_get(inode, 11, "children", value, retval);
++				if(!value) {
++					return 1;
++				}
++				if(copy_to_user((void __user *)arg, value, retval))
++				{
++					ext2_debug("%lu: get_children: Couldn't copy some bytes to user space.\n", inode->i_ino);
++				}
++				else
++				{
++					ext2_debug("%lu: get_children: copied to user space.\n", inode->i_ino);
++				}
++				kfree(value);
++			}
++			else
++			{
++				ext2_debug("%lu: get_children: none found.\n", inode->i_ino);
++			}
++			return 0;
++
+ 	case EXT2_IOC_GETFLAGS:
+ 		ext2_get_inode_flags(ei);
+ 		flags = ei->i_flags & EXT2_FL_USER_VISIBLE;
+diff --git a/fs/ext2/super.c b/fs/ext2/super.c
+index 5c4afe6..71adf6c 100644
+--- a/fs/ext2/super.c
++++ b/fs/ext2/super.c
+@@ -14,6 +14,8 @@
+  *
+  *  Big-endian to little-endian byte-swapping/bitmaps by
+  *        David S. Miller (davem@caip.rutgers.edu), 1995
++ *
++ *  COW layer: Root inode reclamation, Joel (agnel.joel@gmail.com) 2009 
+  */
+ 
+ #include <linux/module.h>
+@@ -160,6 +162,32 @@ static void ext2_destroy_inode(struct inode *inode)
+ 	kmem_cache_free(ext2_inode_cachep, EXT2_I(inode));
+ }
+ 
++static void ext2_drop_inode(struct inode *inode)
++{
++	int parent_ino;
++	struct inode * parent;
++
++	ext2_debug("ext2_drop_inode called\n");
++
++	/* for root inodes */
++	if (ext2_inode_has_children(inode))
++	{
++		ext2_debug("has children,.. should not delete from disk, just forget.\n");
++		generic_forget_inode(inode);
++	}
++	else
++	{
++		ext2_debug("checking if me to be dropped (%lu)\n", inode->i_ino);
++		if (!inode->i_nlink)
++		{
++			ext2_debug("dropped (%lu)\n", inode->i_ino);
++			generic_delete_inode(inode);
++		}
++		else
++			generic_forget_inode(inode);
++	}
++}
++
+ static void init_once(void *foo)
+ {
+ 	struct ext2_inode_info *ei = (struct ext2_inode_info *) foo;
+@@ -299,6 +327,7 @@ static ssize_t ext2_quota_write(struct super_block *sb, int type, const char *da
+ 
+ static const struct super_operations ext2_sops = {
+ 	.alloc_inode	= ext2_alloc_inode,
++	.drop_inode	= ext2_drop_inode,
+ 	.destroy_inode	= ext2_destroy_inode,
+ 	.write_inode	= ext2_write_inode,
+ 	.delete_inode	= ext2_delete_inode,
+diff --git a/fs/inode.c b/fs/inode.c
+index bca0c61..4f5dbbd 100644
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -1203,7 +1203,7 @@ void generic_delete_inode(struct inode *inode)
+ }
+ EXPORT_SYMBOL(generic_delete_inode);
+ 
+-static void generic_forget_inode(struct inode *inode)
++void generic_forget_inode(struct inode *inode)
+ {
+ 	struct super_block *sb = inode->i_sb;
+ 
+@@ -1237,6 +1237,7 @@ static void generic_forget_inode(struct inode *inode)
+ 	wake_up_inode(inode);
+ 	destroy_inode(inode);
+ }
++EXPORT_SYMBOL(generic_forget_inode);
+ 
+ /*
+  * Normal UNIX filesystem behaviour: delete the
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index 3b534e5..9bfb927 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -2144,6 +2144,7 @@ extern ino_t iunique(struct super_block *, ino_t);
+ extern int inode_needs_sync(struct inode *inode);
+ extern void generic_delete_inode(struct inode *inode);
+ extern void generic_drop_inode(struct inode *inode);
++extern void generic_forget_inode(struct inode *inode);
+ 
+ extern struct inode *ilookup5_nowait(struct super_block *sb,
+ 		unsigned long hashval, int (*test)(struct inode *, void *),
